@@ -1,0 +1,116 @@
+#!/usr/bin/env python
+import socket
+import re
+import sys
+import string
+
+# Definition to visting the URL
+# Input  : URL, Cookies and Socket
+# Output : Returns the content of URL
+
+def goto_url(url,csrftoken,sessionid,s):
+    s.send("GET "+ url +" HTTP/1.1\nConnection: keep-alive\nHost: cs5700f16.ccs.neu.edu\nCookie: csrftoken="+csrftoken[0]+" ; sessionid="+sessionid[0]+";"+"\r\n\r\n")
+    page_content = s.recv(1000000)
+    return page_content
+
+
+# Definition of the main function
+# Input  : Command Line Aruguments
+#          argv[1] should contain username
+#          argv[2] should contain password
+# Output : Prints Secret Flags as and when found
+
+def main(argv):
+    #HOST is given as "cs5700f16.ccs.neu.edu" so that the crawler wouldn't move out of domain
+    host = "cs5700f16.ccs.neu.edu"    
+    #PORT is set to 80 for HTTP
+    port = 80
+    #Username and Password will be passed from Command Line
+    username = sys.argv[1]
+    password = sys.argv[2]
+    #SOCKET creation and establishment of the connection
+    clientSocket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    clientSocket.connect((host, port))
+    #Initiate the connection and store the response in buffer called "response"
+    clientSocket.send("GET /accounts/login/?next=/fakebook HTTP/1.1\r\nHost:"+ host+"\r\nConnection: Keep-Alive\r\n\r\n")
+    response= clientSocket.recv(10000)
+    #Grep for csrf and session id in general called cookies to keep the connection alive
+    csrf_token_pattern = re.compile('csrftoken=([a-z0-9]+);')
+    session_id_pattern = re.compile('sessionid=([a-z0-9]+);')
+    #Defining flag_patten and url_pattern to grep for secret flags and URLs
+    flag_pattern= re.compile('FLAG: ([a-z0-9]{64})')
+    url_pattern= re.compile(r'<a href=\"(/fakebook/[a-z0-9/]+)\">')
+    #Send the Username and Password obtained to the host and store the response
+    csrftoken = csrf_token_pattern.findall(response)
+    post_data="username="+ username + "&password="+ password + "&csrfmiddlewaretoken="+csrftoken[0]+"&next=%2Ffakebook%2F"
+    content_length=len(post_data)
+    # loop till you get session id
+    while True:
+        clientSocket.sendall("POST /accounts/login/ HTTP/1.1\nHost:"+ host+"\nConnection: keep-alive\nContent-Length:"+str(content_length)+"\nCookie: csrftoken="+csrftoken[0]+";\r\n\r\nusername="+ username + "&password="+ password + "&csrfmiddlewaretoken="+csrftoken[0]+"&next=%2Ffakebook%2F\r\n")
+        response= clientSocket.recv(100000)
+        sessionid = session_id_pattern.findall(response)
+        if any(sessionid):
+	    break
+    # List unvisited_urls will keep track of URLs to visit
+    # Initially, "/fakebook/" is place here so that the URL will be visited
+    unvisited_urls = ["/fakebook/"]
+    # List visited_urls will keep track of the URLs already visited
+    # This will help in avoiding crawling in loop
+    # Initially, none of the URLs are visited and hence it will be None
+    visited_urls = [None] 
+    # flag_count variable is used to keep track of number of secret flags obtained
+    flag_count=0
+    while (len(unvisited_urls) != 0) and flag_count<5:
+        # Pop the top most URL in the unvisited_urls list to visit
+        url = unvisited_urls.pop()
+        # Check if the URL has been already visited in earlier iterations
+        if url not in visited_urls:
+            # Call "goto_url" definition and store the content in page_content
+            page_content=goto_url(url,csrftoken,sessionid,clientSocket)
+            # Create a list of URLs(urls_found) which match the patten "url_patten" in "page_content"
+            urls_found= url_pattern.findall(page_content)
+            # For every URL found in the page, check whether an entry is present in
+            # unvisited_urls or visited_urls.
+            # If an entry is not found, append the URL to unvisited_urls
+            # This avoid Loops
+            for path in urls_found:
+                if path  not in unvisited_urls and path not in visited_urls:
+                    unvisited_urls.append(path)
+            # Check for Status Code and handle accordingly
+            status_code_pos=string.find(page_content, "Status Code: ") + 10
+            status_code = page_content[status_code_pos: status_code_pos + 3]
+            if status_code == '403' or status_code == '404':
+                visited_urls.append(url)
+            elif status_code == '301' or status_code == '302':
+                redirect_url_pattern = re.compile(r'Location: http://cs5700f16.ccs.neu.edu(/fakebook/[a-z0-9/]*)')
+                new_url = redirect_url_pattern.findall(page_content)
+                for path in new_url:
+                    if path  not in unvisited_urls and path not in visited_urls:
+                        unvisited_urls.append(path)
+            elif status_code == '500':
+                while (status_code == '500'):
+                    s = socket.socket(socket.AF_INET,socket.SOCK_STREAM)
+                    s.connect((host, port))
+                    content=goto_url(url,csrftoken,sessionid,s)
+                    clientSocket=s
+                    status_code_pos=string.find(page_content, "Status Code: ") + 10
+                    status_code = content[status_code_pos: status_code_pos + 3]
+            else:
+                # If able to access webpage, append the URL to visited_urls
+                visited_urls.append(url)
+                soc = socket.socket(socket.AF_INET,socket.SOCK_STREAM)
+                soc.connect((host, port))
+                clientSocket=soc 
+		# In the webpage, search for patten which match FLAG (secretflag)
+                # Get the 64 characters of the flag
+                secret_flag=flag_pattern.findall(page_content)
+                # print flag
+                if any(secret_flag):
+                   flag_count=flag_count+1
+                   print secret_flag[0]
+                   secret_flag=[None]
+
+
+if __name__ == "__main__":
+    main(sys.argv[0:])
+
