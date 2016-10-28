@@ -1,0 +1,75 @@
+#!/usr/bin/python
+import sys
+import ssl
+import socket						 
+import re
+
+# socket object
+s = socket.socket()
+
+# check if both "-p" and "-s" options are specified
+if sys.argv[1] == "-p" and sys.argv[3] == "-s":
+    host= sys.argv[4]
+    port= int(sys.argv[2])
+    NUID=sys.argv[5]
+    s.connect((host, port))
+    s = ssl.wrap_socket(s)
+
+# check if only "-p" option is specified
+elif sys.argv[1] == "-p" and sys.argv[3] != "-s":
+    host= sys.argv[3]
+    port= int(sys.argv[2])
+    NUID=sys.argv[4]
+    s.connect((host, port))
+
+# check if only "-s" option is specified
+elif sys.argv[1] == "-s":
+    host= sys.argv[2]
+    port = 27994
+    NUID= sys.argv[3]
+    s.connect((host, port))
+    s = ssl.wrap_socket(s)
+
+# check if both "-p" and "-s" options are not specified
+else:
+    host= sys.argv[1]
+    port = 27993
+    NUID= sys.argv[2]
+    s.connect((host, port)) 
+
+# send HELLO message
+s.send('cs5700fall2016 HELLO %s\n' % NUID)
+message=s.recv(1024)
+
+#validate STATUS message format 
+if not(message[0:15]=='cs5700fall2016 ' and message[15:22]=='STATUS ' and re.match("\d+\s[+-/*]\s\d+\n",message[22:])): 
+    print "Invalid STATUS message"
+    s.close
+# exit if message not valid
+    sys.exit(0)															
+
+while True:
+    if "BYE" not in message:
+        result= eval(message[22:])
+# send SOLUTION message
+        s.send('cs5700fall2016 %s \n' % result)
+        message=s.recv(1024)
+
+# validate both STATUS message and BYE message format
+	if not(message[0:15]=='cs5700fall2016 ' and message[15:22]=='STATUS ' and re.match("\d+\s[+-/*]\s\d+\n",message[22:])) and \
+	   not(message[0:15]=='cs5700fall2016 ' and re.match('[A-Za-z0-9]{64}',message[15:79]) and message[79:]==' BYE\n'): 
+#check for invalid NUID
+            if not(message[0:15]=='cs5700fall2016 ' and message[15:33]== '\"Unknown_Husky_ID\"' and message[33:]==' BYE\n'):
+	        print "Invalid NUID"
+            else:		        
+	        print "Invalid message"
+
+            s.close
+            sys.exit(0)
+    else:
+# store the secret flag
+        key= message[15:79]
+        print key
+        break
+
+s.close
